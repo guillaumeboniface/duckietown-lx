@@ -25,8 +25,8 @@ from solution.preprocessing import preprocess
 # TODO edit this Config class ! Play with different gain and const values
 @dataclass
 class BraitenbergAgentConfig:
-    gain: float = 0.9
-    const: float = 0.0
+    gain: float = 1.0
+    const: float = 0.45
 
 
 class BraitenbergAgent:
@@ -35,18 +35,14 @@ class BraitenbergAgent:
     left: Optional[np.ndarray]
     right: Optional[np.ndarray]
     rgb: Optional[np.ndarray]
-    l_max: float
-    r_max: float
-    l_min: float
-    r_min: float
+    h_max: float
+    h_min: float
 
     def init(self, context: Context):
         context.info("init()")
         self.rgb = None
-        self.l_max = -math.inf
-        self.r_max = -math.inf
-        self.l_min = math.inf
-        self.r_min = math.inf
+        self.h_max = -math.inf
+        self.h_min = math.inf
         self.left = None
         self.right = None
 
@@ -80,18 +76,25 @@ class BraitenbergAgent:
         l = float(np.sum(P * self.left))
         r = float(np.sum(P * self.right))
 
+        # if a collision on both side pick a side and stick to it
+        if l < 0 and r < 0:
+            if l < r:
+                r = 0
+            else:
+                l = 0
+
         # These are big numbers -- we want to normalize them.
         # We normalize them using the history
 
         # first, we remember the high/low of these raw signals
-        self.l_max = max(l, self.l_max)
-        self.r_max = max(r, self.r_max)
-        self.l_min = min(l, self.l_min)
-        self.r_min = min(r, self.r_min)
+        self.h_max = max(l, self.h_max)
+        self.h_max = max(r, self.h_max)
+        self.h_min = min(l, self.h_min)
+        self.h_min = min(r, self.h_min)
 
-        # now rescale from 0 to 1
-        ls = rescale(l, self.l_min, self.l_max)
-        rs = rescale(r, self.r_min, self.r_max)
+        # now rescale
+        ls = rescale(l, self.h_min, self.h_max)
+        rs = rescale(r, self.h_min, self.h_max)
 
         gain = self.config.gain
         const = self.config.const
@@ -118,4 +121,4 @@ class BraitenbergAgent:
 def rescale(a: float, L: float, U: float):
     if np.allclose(L, U):
         return 0.0
-    return (a - L) / (U - L)
+    return ((a - L) / (U - L) - 1) * 0.4

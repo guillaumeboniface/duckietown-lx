@@ -5,10 +5,11 @@ from planning.planner import (
     rectangle_bounds,
     add_edges,
     pose_to_node,
-    closest_points
+    closest_points,
+    plan_to_destination
 )
 from aido_schemas import Context, FriendlyPose
-from dt_protocols import PlanningSetup, Rectangle, Circle, PlacedPrimitive
+from dt_protocols import PlanningSetup, Rectangle, Circle, PlacedPrimitive, PlanStep
 import unittest
 import math
 
@@ -126,6 +127,30 @@ class TestOne(unittest.TestCase):
         assert(ymin == 1.0)
         assert(xmax == 2.0)
         assert(ymax == 2.0)
+
+    def test_plan_to_destination(self):
+        start = (0, 0, 0)
+        plan_step = PlanStep(1, math.pi / 2, 90)
+        dest = plan_to_destination(plan_step, start)
+        assert(dest == (100, 100, 90))
+
+    def test_plan_to_destination2(self):
+        start = (150, 150, 0)
+        plan_step = PlanStep(duration=6.0, velocity_x_m_s=0.1308996938995747, angular_velocity_deg_s=30.0)
+        dest = plan_to_destination(plan_step, start)
+        assert(dest == (150, 200, 180))
+
+    def test_plan_to_destination3(self):
+        start = (150, 150, 0)
+        plan_step = PlanStep(duration=1.0, velocity_x_m_s=0.4, angular_velocity_deg_s=0.0)
+        dest = plan_to_destination(plan_step, start)
+        assert(dest == (190, 150, 0))
+
+    def test_plan_to_destination4(self):
+        start = (150, 150, 90)
+        plan_step = PlanStep(1, math.pi / 2, 90)
+        dest = plan_to_destination(plan_step, start)
+        assert(dest == (50, 250, 180))
 
 if __name__ == '__main__':
     unittest.main()

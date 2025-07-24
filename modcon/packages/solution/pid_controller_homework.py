@@ -37,12 +37,9 @@ def PIDController(
     kd = gains['kd']
     ki = gains['ki']
 
-    # ------------- DEFINE YOUR PID FUNCTION BELOW ---------
-
-    # These are random values, replace with your implementation of a PID controller in here
-    omega = np.random.uniform(-8.0, 8.0)
-    e = np.random.random()
-    e_int = np.random.random()
-    # ---
+    e = y_hat - y_ref
+    e_int = prev_int_y + e * delta_t
+    d_e = (e - prev_e_y) / delta_t
+    omega = kp * e + ki * e_int + kd * d_e
     
     return v_0, omega, e, e_int

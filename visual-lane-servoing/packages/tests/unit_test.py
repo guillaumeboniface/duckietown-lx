@@ -1,6 +1,8 @@
 import numpy as np
 import cv2
 from matplotlib import pyplot as plt
+import matplotlib.colors as mcolors
+
 
 
 class UnitTestMessage:
@@ -113,6 +115,25 @@ class UnitTestDLM:
         ax9.imshow(right_masked_img * img, cmap="gray")
         ax9.set_title("Mask (Right)"), ax9.set_xticks([]), ax9.set_yticks([])
 
+        imgbgr = cv2.imread("../../assets/images/visual_control/turn.png")
+
+        img = cv2.cvtColor(imgbgr, cv2.COLOR_BGR2GRAY)
+
+        left_masked_img, right_masked_img = detect_lane_markings(imgbgr)
+
+        ax10 = fig.add_subplot(3, 3, 7)
+        ax10.imshow(cv2.cvtColor(imgbgr, cv2.COLOR_BGR2RGB))
+        ax10.set_title("Input image"), ax10.set_xticks([]), ax10.set_yticks([])
+
+        ax11 = fig.add_subplot(3, 3, 8)
+        ax11.imshow(cv2.cvtColor(imgbgr, cv2.COLOR_BGR2RGB))
+        ax11.imshow(left_masked_img * img, cmap="gray")
+        ax11.set_title("Mask (Left)"), ax11.set_xticks([]), ax11.set_yticks([])
+
+        ax12 = fig.add_subplot(3, 3, 9)
+        ax12.imshow(right_masked_img * img, cmap="gray")
+        ax12.set_title("Mask (Right)"), ax12.set_xticks([]), ax12.set_yticks([])
+
 class UnitTestELRH:
     # Test the estimate of the robot's lane-relative heading
     def __init__(self, estimate_lane_relative_heading):
@@ -224,6 +245,45 @@ class UnitTestELRH:
                 # So, for the sake of plotting we treat X as Y, and Y as -X
                 ax4.plot(-Y, X, "b-")
 
+class UnitTestGSM:
+    def __init__(self, get_steer_matrix_left_lane_markings, get_steer_matrix_right_lane_markings):
+        mask1 = get_steer_matrix_left_lane_markings((480, 640))
+        mask2 = get_steer_matrix_right_lane_markings((480, 640))
+        imgbgr = cv2.imread("../../assets/images/visual_control/pic1_rect.png")
+
+        image_rgb = cv2.cvtColor(imgbgr, cv2.COLOR_BGR2RGB)
+
+        fig = plt.figure(figsize=(20, 15))
+
+        cdict = {
+            'red':   [(0.0, 1.0, 1.0),  # At position 0.0 (-1), red is 1
+                    (0.5, 0.0, 0.0),  # At position 0.5 (0), red is 0
+                    (1.0, 0.0, 0.0)], # At position 1.0 (1), red is 0
+
+            'green': [(0.0, 0.0, 0.0),
+                    (1.0, 0.0, 0.0)], # Green is always 0
+
+            'blue':  [(0.0, 0.0, 0.0),  # At position 0.0 (-1), blue is 0
+                    (0.5, 0.0, 0.0),  # At position 0.5 (0), blue is 0
+                    (1.0, 1.0, 1.0)], # At position 1.0 (1), blue is 1
+
+            'alpha': [(0.0, 1.0, 1.0),  # At position 0.0 (-1), alpha is 1 (opaque)
+                    (0.5, 0.0, 0.0),  # At position 0.5 (0), alpha is 0 (transparent)
+                    (1.0, 1.0, 1.0)]  # At position 1.0 (1), alpha is 1 (opaque)
+        }
+        custom_cmap = mcolors.LinearSegmentedColormap('RedBlueAlpha', cdict)
+
+        ax1 = fig.add_subplot(3, 3, 1)
+        ax1.imshow(image_rgb)
+        ax1.set_title("Left"), ax1.set_xticks([]), ax1.set_yticks([])
+        masked_data = np.ma.masked_where(mask1 == 0, mask1)
+        ax1.imshow(masked_data, cmap=custom_cmap, vmin=-1, vmax=1, alpha=0.5)
+
+        ax2 = fig.add_subplot(3, 3, 2)
+        ax2.imshow(image_rgb)
+        ax2.set_title("Right"), ax2.set_xticks([]), ax2.set_yticks([])
+        masked_data = np.ma.masked_where(mask2 == 0, mask2)
+        ax2.imshow(masked_data, cmap=custom_cmap, vmin=-1, vmax=1, alpha=0.5)
 
 def project_image_to_ground(H, x):
     """

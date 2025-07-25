@@ -36,6 +36,12 @@ def transform(p: PlacedPrimitive, robot_pose: FriendlyPose):
     p.pose = new_pose
     return p
 
+def rectangle_center(r: PlacedPrimitive) -> FriendlyPose:
+    pose = r.pose
+    rect = r.primitive
+    return FriendlyPose(pose.x + rect.xmin + (rect.xmax - rect.xmin) / 2, pose.y + rect.ymin + (rect.ymax - rect.ymin) / 2, pose.theta_deg)
+
+
 def localise_rectangle(r: Rectangle, b_pose: FriendlyPose, a_pose: FriendlyPose) -> List[np.array]:
     b_pose_matrix = build_pose_matrix(b_pose)
     a_pose_matrix = np.linalg.inv(build_pose_matrix(a_pose))
@@ -124,7 +130,6 @@ def check_collision_list(
 
     return False
 
-
 def check_collision_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
     # This is just some code to get you started, but you don't have to follow it exactly
 
@@ -158,3 +163,23 @@ def check_collision_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
                 return True
 
     return False
+
+def check_encompass_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
+    a_radius = a.primitive.radius if isinstance(a.primitive, Circle) else rect_diagonal(a.primitive)
+    b_radius = b.primitive.radius if isinstance(b.primitive, Circle) else rect_diagonal(b.primitive)
+    a_center = rectangle_center(a) if isinstance(a.primitive, Rectangle) else a.pose
+    b_center = rectangle_center(b) if isinstance(b.primitive, Rectangle) else b.pose
+    if distance_pose(a_center, b_center) + b_radius <= a_radius:
+        return True
+    return False
+
+def clean_environment(environment: List[PlacedPrimitive]) -> List[PlacedPrimitive]:
+    env_w_motion = filter(lambda x: x.motion is not None, environment)
+    env_wo_motion = list(filter(lambda x: x.motion is None, environment))
+    to_remove = set()
+    for a, b in itertools.product(env_wo_motion, env_wo_motion):
+        if a == b or b in to_remove:
+            continue
+        if check_encompass_shape(a, b):
+            to_remove.add(a)
+    return [e for e in env_wo_motion if e not in to_remove] + list(env_w_motion)

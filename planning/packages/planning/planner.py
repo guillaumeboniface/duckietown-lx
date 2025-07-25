@@ -5,8 +5,9 @@ from typing import Tuple, Dict, Optional, Any
 from dataclasses import dataclass, field
 import math
 from queue import PriorityQueue
-from planning.collision_check import check_point_collision
-
+from planning.collision_check import check_point_collision, clean_environment
+from planning.timed_env import TimedEnv
+from planning.common import plan_to_destination_dt, pose_to_node, node_to_pose, float_to_node_index
 from aido_schemas import Context, FriendlyPose
 from dt_protocols import (
     PlacedPrimitive,
@@ -143,18 +144,6 @@ def closest_points(primitive_bounds: Rectangle, bounds: Rectangle, tolerance: fl
     ymax =  min(math.ceil(primitive_bounds.ymax / tolerance) * tolerance, bounds.ymax)
     return xmin, ymin, xmax, ymax
 
-def pose_to_node(ps: PlanningSetup, pose: FriendlyPose) -> Tuple[float]:
-    return float_to_node_index((
-        pose.x,
-        pose.y,
-        pose.theta_deg
-    ))
-
-def node_to_pose(node: Tuple[int, int, int]) -> FriendlyPose:
-    return FriendlyPose(x=node[0] / 100, y=node[1] / 100, theta_deg=node[2])
-
-def float_to_node_index(t: Tuple[float, float, float]) -> Tuple[int, int, int]:
-    return (round(t[0] * 100), round(t[1] * 100), round(t[2]))
 
 def compute_edge_kernel(ps: PlanningSetup) -> Dict[int, List[Tuple[float, float, PlanStep, float]]]:
     kernel = {}
@@ -213,11 +202,13 @@ def options_to_destinations(
         ps: PlanningSetup,
         options: Tuple[PlanStep, ...],
         start: Tuple[int, int, int],
-        goal: Tuple[int, int, int]) -> List[Tuple[PlanStep, Tuple[int, int, int]]]:
+        goal: Tuple[int, int, int],
+        t: float) -> List[Tuple[PlanStep, Tuple[int, int, int]]]:
     destinations = []
+    dt = 0.3
     for plan_step in options:
-        path = plan_to_destination(plan_step, start, 2)
-        if not check_point_collision(ps, path):
+        path = plan_to_destination_dt(plan_step, start, dt, t)
+        if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, path):
             destinations.append((plan_step, path[-1]))
 
     plan_step, new_heading = connect_poses_with_curvature(
@@ -225,9 +216,14 @@ def options_to_destinations(
         FriendlyPose(start[0] / 100, start[1] / 100, start[2]),
         FriendlyPose(goal[0] / 100, goal[1] / 100, goal[2])
     )
-    path = plan_to_destination(plan_step, start, 2)
-    if not check_point_collision(ps, path):
+    path = plan_to_destination_dt(plan_step, start, dt, t)
+    if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, path):
         destinations.append((plan_step, (goal[0], goal[1], new_heading)))
+
+    if ps.max_curvature == math.inf:
+        destinations.append((create_turn(ps, goal[2] - start[2]), (start[0], start[1], goal[2])))
+        heading, _ = find_heading_and_distance(node_to_pose(start), node_to_pose(goal))
+        destinations.append((create_turn(ps, heading - start[2]), (start[0], start[1], heading)))
 
     return destinations
 
@@ -285,19 +281,29 @@ def plan_from_path(graph: nx.MultiDiGraph, path: List[Tuple[int, int, int]]) -> 
 def node_distance(start: Tuple[int, int, int], goal: Tuple[int, int, int]) -> float:
     return np.linalg.norm(np.array(start[:2]) - np.array(goal[:2]))
 
+def node_in_bounds(node: Tuple[int, int, int], bounds: Rectangle) -> bool:
+    return round(bounds.xmin * 100) <= node[0] <= round(bounds.xmax * 100) and round(bounds.ymin * 100) <= node[1] <= round(bounds.ymax * 100)
+
+def nodes_in_bounds(nodes: List[Tuple[int, int, int]], bounds: Rectangle) -> bool:
+    for node in nodes:
+        if not node_in_bounds(node, bounds):
+            return False
+    return True
+
 def heuristic(ps: PlanningSetup, start: Tuple[int, int, int], goal: Tuple[int, int, int], duration: float) -> float:
     step, new_heading = connect_poses_with_curvature(
         ps,
         node_to_pose(start),
         node_to_pose(goal))
-    return step.duration #+ abs(goal[2] - new_heading) / 10
+    step2_duration = sum(map(lambda x: x.duration, connect_poses(ps, node_to_pose(start), node_to_pose(goal))))
+    return min(step.duration, step2_duration)
 
-def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> Tuple[Optional[List[PlanStep]], Optional[List[FriendlyPose]]]:
+def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose, timed_env: TimedEnv) -> Tuple[Optional[List[PlanStep]], Optional[List[FriendlyPose]]]:
     queue = PriorityQueue()
-    queue.put(PrioritizedItem(0, [pose_to_node(ps, start)]))
-    visited = set([pose_to_node(ps, start)])
+    queue.put(PrioritizedItem(0, [pose_to_node(start)]))
+    visited = set([pose_to_node(start)])
     options = driving_options(ps)
-    goal_node = pose_to_node(ps, goal)
+    goal_node = pose_to_node(goal)
 
     while not queue.empty():
             p_item = queue.get()
@@ -311,10 +317,13 @@ def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> Tuple[
                 print(f"A star finished, {len(visited)} nodes visited")
                 return path[1::2], path[0::2]
             
-            destinations = options_to_destinations(ps, options, current, goal_node)
+            t = sum(map(lambda x: x.duration, path[1::2]))
+            env = timed_env.get_env(t)
+            ps.environment = env
+            destinations = options_to_destinations(ps, options, current, goal_node, t % timed_env.dt)
             
             for plan, destination in destinations:
-                if destination in visited or destination[0] < round(ps.bounds.xmin * 100) or destination[0] > round(ps.bounds.xmax * 100) or destination[1] < round(ps.bounds.ymin * 100) or destination[1] > round(ps.bounds.ymax * 100):
+                if destination in visited or not node_in_bounds(destination, ps.bounds):
                     continue
                 visited.add(destination)
                 cost = current_cost + heuristic(ps, destination, goal_node, plan.duration)
@@ -356,6 +365,10 @@ class Planner:
         # so you don't need to compute it
         bounds: Rectangle = self.params.bounds
 
+        self.params.environment = clean_environment(environment)
+
+        self.timed_env = TimedEnv(environment, 0.2)
+
         # self.graph = create_graph(self.params, bounds, environment)
 
         # add_edges(self.graph, self.params)
@@ -375,7 +388,7 @@ class Planner:
         if not pose_in_rectangle(goal, self.params.bounds):
             feasible = False
 
-        plan, _ = a_star(self.params, start, goal)
+        plan, _ = a_star(self.params, start, goal, self.timed_env)
 
         if plan is None:
             feasible = False

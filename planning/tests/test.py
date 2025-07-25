@@ -9,8 +9,9 @@ from planning.planner import (
     plan_to_destination,
 )
 from planning.collision_check import check_point_collision
+from planning.timed_env import TimedEnv
 from aido_schemas import Context, FriendlyPose
-from dt_protocols import PlanningSetup, Rectangle, Circle, PlacedPrimitive, PlanStep, Appearance
+from dt_protocols import PlanningSetup, Rectangle, Circle, PlacedPrimitive, PlanStep, Appearance, Motion
 import unittest
 import math
 
@@ -95,18 +96,7 @@ class TestOne(unittest.TestCase):
         assert(abs(bounds.ymax - 1.414213562373095) < 1e-12)
 
     def test_pose_to_node(self):
-        ps = PlanningSetup(
-            bounds=Rectangle(xmin=0.0, ymin=0.0, xmax=3.0, ymax=3.0),
-            max_linear_velocity_m_s=0.4,
-            min_linear_velocity_m_s=-0.3,
-            max_angular_velocity_deg_s=30.0,
-            max_curvature=math.inf,
-            tolerance_xy_m=0.05,
-            tolerance_theta_deg=20.0,
-            environment=[],
-            body=[]
-        )
-        node = pose_to_node(ps, FriendlyPose(1.0, 0.1, 0.0))
+        node = pose_to_node(FriendlyPose(1.0, 0.1, 0.0))
         assert(node == (100, 10, 0.0))
 
     def test_closest_points(self):
@@ -305,8 +295,84 @@ class TestOne(unittest.TestCase):
             tolerance_xy_m=0.05,
             tolerance_theta_deg=20.0,
         )
-        print(dest)
         assert(check_point_collision(ps, dest))
+
+    def test_create_turn(self):
+        ps = PlanningSetup(
+            bounds=Rectangle(xmin=0.0, ymin=0.0, xmax=3.0, ymax=3.0),
+            max_linear_velocity_m_s=0.4,
+            min_linear_velocity_m_s=-0.3,
+            max_angular_velocity_deg_s=30.0,
+            max_curvature=math.inf,
+            tolerance_xy_m=0.05,
+            tolerance_theta_deg=20.0,
+            environment=[],
+            body=[]
+        )
+        turn = create_turn(ps, 193 - 130)
+
+    def test_timed_env(self):
+        ps = PlanningSetup(
+            environment=[
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=3.539619150260161, y=2.764151352098707, theta_deg=200.25092590378074),
+                    primitive=Circle(radius=0.4955915626161882),
+                    motion=Motion(
+                        steps=[PlanStep(duration=11.333024885304347, velocity_x_m_s=0.4, angular_velocity_deg_s=-8.372301118745584)],
+                        periodic=False
+                    ),
+                    appearance=Appearance(fillcolor="brown"),
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=3.539619150260162, y=2.764151352098707, theta_deg=200.25092590378074),
+                    primitive=Circle(radius=0.4955915626161882),
+                    appearance=Appearance(fillcolor="brown"),
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=3.539619150260163, y=2.764151352098707, theta_deg=200.25092590378074),
+                    primitive=Circle(radius=0.4955915626161882),
+                    motion=Motion(
+                        steps=[PlanStep(duration=5.2, velocity_x_m_s=0.4, angular_velocity_deg_s=-8.372301118745584)],
+                        periodic=False
+                    ),
+                    appearance=Appearance(fillcolor="brown"),
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=4.0, y=2.0, theta_deg=200.25092590378074),
+                    primitive=Circle(radius=0.4955915626161882),
+                    motion=Motion(
+                        steps=[PlanStep(duration=5.0, velocity_x_m_s=0.4, angular_velocity_deg_s=-8.372301118745584)],
+                        periodic=True
+                    ),
+                    appearance=Appearance(fillcolor="brown"),
+                ),
+            ],
+            body=[
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=-0.13, ymin=-0.045, xmax=0.07, ymax=0.045),
+                    appearance=Appearance(fillcolor="blue", rel_zorder=1),
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=-0.03, ymin=-0.065, xmax=0.03, ymax=0.065),
+                    appearance=Appearance(fillcolor="black", rel_zorder=-1),
+                ),
+            ],
+            bounds=Rectangle(xmin=0.0, ymin=0.0, xmax=5.0, ymax=5.0),
+            max_linear_velocity_m_s=0.4,
+            min_linear_velocity_m_s=-0.3,
+            max_angular_velocity_deg_s=30.0,
+            max_curvature=float("inf"),
+            tolerance_xy_m=0.05,
+            tolerance_theta_deg=20.0,
+        )
+        t_env = TimedEnv(ps.environment, 5)
+        assert(len(t_env.get_env(15.0)) == 4)
+        periodic_prim = t_env.get_env(10.0)[3]
+        assert(round(periodic_prim.pose.x) == 4)
+        assert(round(periodic_prim.pose.y) == 2)
+
 
 if __name__ == '__main__':
     unittest.main()

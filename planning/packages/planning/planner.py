@@ -5,6 +5,7 @@ from typing import Tuple, Dict, Optional, Any
 from dataclasses import dataclass, field
 import math
 from queue import PriorityQueue
+from planning.collision_check import check_point_collision
 
 from aido_schemas import Context, FriendlyPose
 from dt_protocols import (
@@ -185,25 +186,28 @@ def driving_options(ps: PlanningSetup) -> Tuple[PlanStep, ...]:
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, d, 0))[0])
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(d, -d, 0))[0])
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, -d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(d, 2*d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(2*d, d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, 2*d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-2*d, d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(d, -2*d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(2*d, -d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, -2*d, 0))[0])
-        # OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-2*d, -d, 0))[0])
-
-    # for m in (10, 5, 2):
-    #     d = ps.tolerance_xy_m * m
-    #     for k in range(0, 360, 5):
-    #         start = FriendlyPose(x=0, y=0, theta_deg=0)
-    #         goal = FriendlyPose(x=np.cos(np.deg2rad(k)) * d, y=np.sin(np.deg2rad(k)) * d, theta_deg=k)
-    #         plan, new_heading = connect_poses_with_curvature(ps, start, goal)
-    #         if plan is not None:
-    #             OPTIONS.append(plan)
     
     return OPTIONS
+
+
+def plan_to_destination(plan_step: PlanStep, start: Tuple[int, int, int], n_samples: int=1) -> List[Tuple[int, int, int]]:
+    destinations = []
+    for i in range(1, n_samples + 1):
+        segment_duration = plan_step.duration / n_samples * i
+        rotation = plan_step.angular_velocity_deg_s * segment_duration
+        if abs(rotation) < 1e-12:
+            chord = plan_step.velocity_x_m_s * segment_duration
+            theta = np.deg2rad(start[2])
+        else:
+            theta = np.deg2rad(start[2] + rotation / 2)
+            r = plan_step.velocity_x_m_s * segment_duration / np.deg2rad(rotation)
+            chord = 2 * r * np.sin(np.deg2rad(rotation / 2))
+        x = start[0] + chord * np.cos(theta) * 100
+        y = start[1] + chord * np.sin(theta) * 100
+        heading = (start[2] + rotation) % 360
+        destinations.append((round(x), round(y), round(heading)))
+    return destinations
+
 
 def options_to_destinations(
         ps: PlanningSetup,
@@ -212,30 +216,64 @@ def options_to_destinations(
         goal: Tuple[int, int, int]) -> List[Tuple[PlanStep, Tuple[int, int, int]]]:
     destinations = []
     for plan_step in options:
-        destinations.append((plan_step, plan_to_destination(plan_step, start)))
+        path = plan_to_destination(plan_step, start, 2)
+        if not check_point_collision(ps, path):
+            destinations.append((plan_step, path[-1]))
 
     plan_step, new_heading = connect_poses_with_curvature(
         ps,
         FriendlyPose(start[0] / 100, start[1] / 100, start[2]),
         FriendlyPose(goal[0] / 100, goal[1] / 100, goal[2])
     )
-    destinations.append((plan_step, (goal[0], goal[1], new_heading)))
+    path = plan_to_destination(plan_step, start, 2)
+    if not check_point_collision(ps, path):
+        destinations.append((plan_step, (goal[0], goal[1], new_heading)))
 
     return destinations
 
-def plan_to_destination(plan_step: PlanStep, start: Tuple[int, int, int]) -> Tuple[int, int, int]:
-    rotation = plan_step.angular_velocity_deg_s * plan_step.duration
-    if abs(rotation) < 1e-12:
-        chord = plan_step.velocity_x_m_s * plan_step.duration
-        theta = np.deg2rad(start[2])
-    else:
-        theta = np.deg2rad(start[2] + rotation / 2)
-        r = plan_step.velocity_x_m_s * plan_step.duration / np.deg2rad(rotation)
-        chord = 2 * r * np.sin(np.deg2rad(rotation / 2))
-    x = start[0] + chord * np.cos(theta) * 100
-    y = start[1] + chord * np.sin(theta) * 100
-    heading = (start[2] + rotation) % 360
-    return (round(x), round(y), round(heading))
+
+def create_graph(ps: PlanningSetup, bounds: Rectangle, environment: List[PlacedPrimitive]) -> nx.MultiDiGraph:
+    graph = nx.MultiDiGraph()
+    for i in np.arange(bounds.xmin, bounds.xmax, ps.tolerance_xy_m):
+        for j in np.arange(bounds.ymin, bounds.ymax, ps.tolerance_xy_m):
+            for k in np.arange(0, 360, ps.tolerance_theta_deg):
+                graph.add_node(float_to_node_index((i, j, k)), x=i, y=j, theta_deg=k)
+
+    for placed_primitive in environment:
+            if isinstance(placed_primitive.primitive, Circle):
+                primitive_bounds: Rectangle = circle_bounds(placed_primitive.primitive, placed_primitive.pose)
+            else:
+                # This is a conservative approximation when the rectangle is not aligned with the axes
+                primitive_bounds: Rectangle = rectangle_bounds(placed_primitive.primitive, placed_primitive.pose)
+
+            xmin, ymin, xmax, ymax = closest_points(primitive_bounds, bounds, ps.tolerance_xy_m)
+
+            for i in np.arange(xmin, xmax, ps.tolerance_xy_m):
+                for j in np.arange(ymin, ymax, ps.tolerance_xy_m):
+                    for k in np.arange(0, 360, ps.tolerance_theta_deg):
+                        if float_to_node_index((i, j, k)) in graph.nodes():
+                            graph.remove_node(float_to_node_index((i, j, k)))
+
+    return graph
+
+def add_edges(graph: nx.MultiDiGraph, ps: PlanningSetup):
+    kernel = compute_edge_kernel(ps)
+
+    for node in graph.nodes():
+        x, y, theta_deg = node
+        x = x / 100
+        y = y / 100
+
+        for i, j, plan, new_theta_deg in kernel[theta_deg]:
+            if float_to_node_index((x + i, y + j, new_theta_deg)) in graph.nodes():
+                graph.add_edge(node, float_to_node_index((x + i, y + j, new_theta_deg)), plan=plan)
+
+        for k in np.arange(0, 360, ps.tolerance_theta_deg):
+            if abs(k - theta_deg) < 1e-12:
+                continue
+            if float_to_node_index((x, y, k)) in graph.nodes():
+                plan = create_turn(ps, k - theta_deg)
+                graph.add_edge(node, float_to_node_index((x, y, k)), plan=plan)
 
 def plan_from_path(graph: nx.MultiDiGraph, path: List[Tuple[int, int, int]]) -> List[PlanStep]:
     edges = list(zip(path, path[1:]))
@@ -252,7 +290,7 @@ def heuristic(ps: PlanningSetup, start: Tuple[int, int, int], goal: Tuple[int, i
         ps,
         node_to_pose(start),
         node_to_pose(goal))
-    return step.duration + abs(goal[2] - new_heading)
+    return step.duration #+ abs(goal[2] - new_heading) / 10
 
 def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> Tuple[Optional[List[PlanStep]], Optional[List[FriendlyPose]]]:
     queue = PriorityQueue()
@@ -264,12 +302,13 @@ def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> Tuple[
     while not queue.empty():
             p_item = queue.get()
             current_cost, path = p_item.priority, p_item.item
-            if len(visited) > 128000:
+            if len(visited) > 64000:
                 break
             current = path[-1]
 
             x, y, theta_deg = current
             if node_distance(current, goal_node) < ps.tolerance_xy_m and abs(theta_deg - goal_node[2]) < ps.tolerance_theta_deg:
+                print(f"A star finished, {len(visited)} nodes visited")
                 return path[1::2], path[0::2]
             
             destinations = options_to_destinations(ps, options, current, goal_node)
@@ -317,13 +356,15 @@ class Planner:
         # so you don't need to compute it
         bounds: Rectangle = self.params.bounds
 
-        self.graph = create_graph(self.params, bounds, environment)
+        # self.graph = create_graph(self.params, bounds, environment)
 
-        add_edges(self.graph, self.params)
+        # add_edges(self.graph, self.params)
 
 
     def on_received_query(self, context: Context, data: PlanningQuery):
         # A planning query is a pair of initial and goal poses
+        print(f"PLANNING QUERY: {data}")
+
         start: FriendlyPose = data.start
         goal: FriendlyPose = data.target
 

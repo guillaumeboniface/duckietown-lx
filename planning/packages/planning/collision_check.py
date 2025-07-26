@@ -2,7 +2,8 @@ import itertools
 import random
 from typing import List, Tuple
 import numpy as np
-
+from planning.timed_env import TimedEnv
+from planning.common import distance_pose, rect_diagonal
 from aido_schemas import Context, FriendlyPose
 from dt_protocols import (
     Circle,
@@ -36,10 +37,7 @@ def transform(p: PlacedPrimitive, robot_pose: FriendlyPose):
     p.pose = new_pose
     return p
 
-def rectangle_center(r: PlacedPrimitive) -> FriendlyPose:
-    pose = r.pose
-    rect = r.primitive
-    return FriendlyPose(pose.x + rect.xmin + (rect.xmax - rect.xmin) / 2, pose.y + rect.ymin + (rect.ymax - rect.ymin) / 2, pose.theta_deg)
+
 
 
 def localise_rectangle(r: Rectangle, b_pose: FriendlyPose, a_pose: FriendlyPose) -> List[np.array]:
@@ -75,12 +73,6 @@ def check_circle_rectangle_overlap(x: float, y: float, radius: float, r: Rectang
     dy: float = axis_distance(r.ymin, r.ymax, y)
     return dx ** 2 + dy ** 2 <= radius ** 2
 
-def distance_pose(a: FriendlyPose, b: FriendlyPose) -> float:
-    return np.linalg.norm(np.array([a.x - b.x, a.y - b.y]))
-
-def rect_diagonal(r: Rectangle) -> float:
-    return np.linalg.norm(np.array([r.xmax - r.xmin, r.ymax - r.ymin]))
-
 def rect_small_radius(r: Rectangle) -> float:
     return min(r.xmax - r.xmin, r.ymax - r.ymin) / 2
 
@@ -114,9 +106,9 @@ def check_collision(
     return collided
 
 
-def check_point_collision(ps: PlanningSetup, points: List[Tuple[int, int, int]]) -> bool:
-    for point in points:
-        if check_collision(ps.environment, ps.body, FriendlyPose(point[0] / 100, point[1] / 100, point[2])):
+def check_point_collision(ps: PlanningSetup, timed_env: TimedEnv, t: float, points: List[Tuple[int, int, int]]) -> bool:
+    for i, point in enumerate(points):
+        if check_collision(timed_env.get_env(t + i * timed_env.dt), ps.body, FriendlyPose(point[0] / 100, point[1] / 100, point[2])):
             return True
     return False
 
@@ -163,23 +155,3 @@ def check_collision_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
                 return True
 
     return False
-
-def check_encompass_shape(a: PlacedPrimitive, b: PlacedPrimitive) -> bool:
-    a_radius = a.primitive.radius if isinstance(a.primitive, Circle) else rect_diagonal(a.primitive)
-    b_radius = b.primitive.radius if isinstance(b.primitive, Circle) else rect_diagonal(b.primitive)
-    a_center = rectangle_center(a) if isinstance(a.primitive, Rectangle) else a.pose
-    b_center = rectangle_center(b) if isinstance(b.primitive, Rectangle) else b.pose
-    if distance_pose(a_center, b_center) + b_radius <= a_radius:
-        return True
-    return False
-
-def clean_environment(environment: List[PlacedPrimitive]) -> List[PlacedPrimitive]:
-    env_w_motion = filter(lambda x: x.motion is not None, environment)
-    env_wo_motion = list(filter(lambda x: x.motion is None, environment))
-    to_remove = set()
-    for a, b in itertools.product(env_wo_motion, env_wo_motion):
-        if a == b or b in to_remove:
-            continue
-        if check_encompass_shape(a, b):
-            to_remove.add(a)
-    return [e for e in env_wo_motion if e not in to_remove] + list(env_w_motion)

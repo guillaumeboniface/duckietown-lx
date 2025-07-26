@@ -1,8 +1,7 @@
 from typing import Dict, List, Tuple
 from dt_protocols import PlacedPrimitive, PlanStep
 from aido_schemas import Context, FriendlyPose
-from planning.collision_check import clean_environment
-from planning.common import plan_to_destination_dt, pose_to_node, node_to_pose
+from planning.common import plan_to_destination_dt, pose_to_node, node_to_pose, clean_environment
 import numpy as np
 import itertools
 import math
@@ -36,8 +35,8 @@ def expand_trajectory(trajectory: List[Tuple[float, PlacedPrimitive]], dt: float
     n_samples = int(max_t / dt) + 1
     new_trajectory: List[Tuple[float, PlacedPrimitive]] = []
     if periodic:
-        # Create an infinite iterator of the trajectory that traverses it forward then backward
-        iterator = itertools.cycle(trajectory + trajectory[1:-1][::-1])
+        # Create an infinite iterator of the trajectory that loops the trajectory
+        iterator = itertools.cycle(trajectory)
         for i in range(n_samples):
             new_trajectory.append((i * dt, next(iterator)[1]))
     else:

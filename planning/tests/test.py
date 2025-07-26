@@ -373,6 +373,53 @@ class TestOne(unittest.TestCase):
         assert(round(periodic_prim.pose.x) == 4)
         assert(round(periodic_prim.pose.y) == 2)
 
+    def test_timed_env2(self):
+        ps = PlanningSetup(
+            environment=[
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=0.0, ymin=0.0, xmax=0.1, ymax=4.0),
+                    appearance=Appearance(fillcolor="brown")
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=3.9, ymin=0.0, xmax=4.0, ymax=4.0),
+                    appearance=Appearance(fillcolor="brown")
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=0.0, ymin=3.9, xmax=4.0, ymax=4.0),
+                    appearance=Appearance(fillcolor="brown")
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=0.0, ymin=0.0, xmax=4.0, ymax=0.1),
+                    appearance=Appearance(fillcolor="brown")
+                ),
+            ],
+            body=[
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=-0.13, ymin=-0.045, xmax=0.07, ymax=0.045),
+                    appearance=Appearance(fillcolor="blue", rel_zorder=1),
+                ),
+                PlacedPrimitive(
+                    pose=FriendlyPose(x=0.0, y=0.0, theta_deg=0.0),
+                    primitive=Rectangle(xmin=-0.03, ymin=-0.065, xmax=0.03, ymax=0.065),
+                    appearance=Appearance(fillcolor="black", rel_zorder=-1),
+                ),
+            ],
+            bounds=Rectangle(xmin=0.0, ymin=0.0, xmax=5.0, ymax=5.0),
+            max_linear_velocity_m_s=0.4,
+            min_linear_velocity_m_s=-0.3,
+            max_angular_velocity_deg_s=30.0,
+            max_curvature=float("inf"),
+            tolerance_xy_m=0.05,
+            tolerance_theta_deg=20.0,
+        )
+        t_env = TimedEnv(ps.environment, 5)
+        assert(len(t_env.get_env(15.0)) == 4)
+
 
 if __name__ == '__main__':
     unittest.main()

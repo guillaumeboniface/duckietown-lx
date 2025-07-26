@@ -5,9 +5,9 @@ from typing import Tuple, Dict, Optional, Any
 from dataclasses import dataclass, field
 import math
 from queue import PriorityQueue
-from planning.collision_check import check_point_collision, clean_environment
+from planning.collision_check import check_point_collision
 from planning.timed_env import TimedEnv
-from planning.common import plan_to_destination_dt, pose_to_node, node_to_pose, float_to_node_index
+from planning.common import plan_to_destination_dt, pose_to_node, node_to_pose, float_to_node_index, clean_environment
 from aido_schemas import Context, FriendlyPose
 from dt_protocols import (
     PlacedPrimitive,
@@ -203,12 +203,15 @@ def options_to_destinations(
         options: Tuple[PlanStep, ...],
         start: Tuple[int, int, int],
         goal: Tuple[int, int, int],
-        t: float) -> List[Tuple[PlanStep, Tuple[int, int, int]]]:
+        t: float,
+        timed_env: TimedEnv) -> List[Tuple[PlanStep, Tuple[int, int, int]]]:
     destinations = []
-    dt = 0.3
+    dt = timed_env.dt
+    if start[:2] == (308, 39) and round(start[2]) == 128:
+        print("Suspicious start")
     for plan_step in options:
         path = plan_to_destination_dt(plan_step, start, dt, t)
-        if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, path):
+        if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, timed_env, t, path):
             destinations.append((plan_step, path[-1]))
 
     plan_step, new_heading = connect_poses_with_curvature(
@@ -217,7 +220,7 @@ def options_to_destinations(
         FriendlyPose(goal[0] / 100, goal[1] / 100, goal[2])
     )
     path = plan_to_destination_dt(plan_step, start, dt, t)
-    if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, path):
+    if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, timed_env, t, path):
         destinations.append((plan_step, (goal[0], goal[1], new_heading)))
 
     if ps.max_curvature == math.inf:
@@ -318,9 +321,7 @@ def a_star(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose, timed_env
                 return path[1::2], path[0::2]
             
             t = sum(map(lambda x: x.duration, path[1::2]))
-            env = timed_env.get_env(t)
-            ps.environment = env
-            destinations = options_to_destinations(ps, options, current, goal_node, t % timed_env.dt)
+            destinations = options_to_destinations(ps, options, current, goal_node, t, timed_env)
             
             for plan, destination in destinations:
                 if destination in visited or not node_in_bounds(destination, ps.bounds):
@@ -367,7 +368,7 @@ class Planner:
 
         self.params.environment = clean_environment(environment)
 
-        self.timed_env = TimedEnv(environment, 0.2)
+        self.timed_env = TimedEnv(environment, 0.1)
 
         # self.graph = create_graph(self.params, bounds, environment)
 

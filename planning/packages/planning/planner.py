@@ -69,6 +69,13 @@ def create_straight(ps: PlanningSetup, distance: float) -> PlanStep:
         angular_velocity_deg_s=0.0
     )
 
+
+def is_turn_ok(ps: PlanningSetup, step: PlanStep) -> bool:
+    if abs(step.angular_velocity_deg_s) < 1e-12:
+        return True
+    return abs(step.velocity_x_m_s / np.deg2rad(step.angular_velocity_deg_s)) >= 1 / ps.max_curvature
+
+
 def connect_poses(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> List[PlanStep]:
     plan: List[PlanStep] = []
     if start.x == goal.x and start.y == goal.y:
@@ -79,6 +86,7 @@ def connect_poses(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) ->
         plan.append(create_straight(ps, distance))
         plan.append(create_turn(ps, goal.theta_deg - (heading - start.theta_deg)))
     return plan
+
 
 def connect_poses_with_curvature(ps: PlanningSetup, start: FriendlyPose, goal: FriendlyPose) -> Tuple[PlanStep, float]:
     heading, chord = find_heading_and_distance(start, goal)
@@ -123,8 +131,10 @@ def connect_poses_with_curvature(ps: PlanningSetup, start: FriendlyPose, goal: F
 
     return plan, (start.theta_deg + theta) % 360
 
+
 def circle_bounds(circle: Circle, pose: FriendlyPose) -> Rectangle:
     return Rectangle(xmin=pose.x - circle.radius, ymin=pose.y - circle.radius, xmax=pose.x + circle.radius, ymax=pose.y + circle.radius)
+
 
 def rectangle_bounds(rectangle: Rectangle, pose: FriendlyPose) -> Rectangle:
     pose_matrix = np.linalg.inv(build_pose_matrix(pose))
@@ -136,6 +146,7 @@ def rectangle_bounds(rectangle: Rectangle, pose: FriendlyPose) -> Rectangle:
     ])
     transformed_points = np.dot(pose_matrix, points.T).T
     return Rectangle(xmin=transformed_points[:, 0].min(), ymin=transformed_points[:, 1].min(), xmax=transformed_points[:, 0].max(), ymax=transformed_points[:, 1].max())
+
 
 def closest_points(primitive_bounds: Rectangle, bounds: Rectangle, tolerance: float) -> Tuple[float]:
     xmin =  max(math.floor(primitive_bounds.xmin / tolerance) * tolerance, bounds.xmin)
@@ -162,6 +173,7 @@ def compute_edge_kernel(ps: PlanningSetup) -> Dict[int, List[Tuple[float, float,
                     kernel[k].append((i, j, plan, round(new_heading) % 360))
     return kernel
 
+
 def driving_options(ps: PlanningSetup) -> Tuple[PlanStep, ...]:
     OPTIONS = []
 
@@ -175,6 +187,22 @@ def driving_options(ps: PlanningSetup) -> Tuple[PlanStep, ...]:
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, d, 0))[0])
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(d, -d, 0))[0])
         OPTIONS.append(connect_poses_with_curvature(ps, FriendlyPose(0, 0, 0), FriendlyPose(-d, -d, 0))[0])
+
+    # if ps.max_curvature != math.inf:
+    #     for theta in range(15, 195, 15):
+    #         OPTIONS.append(PlanStep(
+    #             duration=theta / ps.max_angular_velocity_deg_s,
+    #             velocity_x_m_s=np.deg2rad(ps.max_angular_velocity_deg_s) * (1 / ps.max_curvature),
+    #             angular_velocity_deg_s=ps.max_angular_velocity_deg_s
+    #         ))
+    #         OPTIONS.append(PlanStep(
+    #             duration=theta / ps.max_angular_velocity_deg_s,
+    #             velocity_x_m_s=np.deg2rad(-ps.max_angular_velocity_deg_s) * (1 / ps.max_curvature),
+    #             angular_velocity_deg_s=-ps.max_angular_velocity_deg_s
+    #         ))
+
+    if ps.max_curvature != math.inf:
+        OPTIONS = [option for option in OPTIONS if is_turn_ok(ps, option)]
     
     return OPTIONS
 
@@ -220,7 +248,8 @@ def options_to_destinations(
         FriendlyPose(goal[0] / 100, goal[1] / 100, goal[2])
     )
     path = plan_to_destination_dt(plan_step, start, dt, t)
-    if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, timed_env, t, path):
+    if nodes_in_bounds(path, ps.bounds) and not check_point_collision(ps, timed_env, t, path) \
+        and (ps.max_curvature == math.inf or is_turn_ok(ps, plan_step)):
         destinations.append((plan_step, (goal[0], goal[1], new_heading)))
 
     if ps.max_curvature == math.inf:
